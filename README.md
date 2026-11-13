@@ -1,96 +1,122 @@
 # thread-search
 
-`threads` keeps a local SQLite full-text index of your Claude Code conversation threads
-and searches it fast enough to run on every key press. It reads the transcripts that Claude
-Code writes under `~/.claude/projects` and never changes them.
+**Find any past Claude Code conversation in milliseconds.**
+
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Rust 1.100+](https://img.shields.io/badge/rust-1.100%2B-orange.svg)](https://www.rust-lang.org)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#install)
+[![No network](https://img.shields.io/badge/network-none-success.svg)](#privacy)
+
+`threads` keeps a local SQLite full-text index of your Claude Code threads. It searches every
+message fast enough to run on each key press, ranks the threads, and prints the command that
+resumes each one.
+
+![threads demo: update the index, search by words, search by ticket key](docs/images/demo.gif)
+
+<sub>The demo uses fake threads from [`demo/make_demo.py`](demo/make_demo.py).</sub>
+
+## Features
+
+- **Full text.** Searches every user and assistant message, the thread title, the folder, and the git branch.
+- **Fast.** About 6 ms for a search over 1,800 threads and 65,000 messages. See [Performance](#performance).
+- **Search as you type.** The last word matches as a prefix from one letter, so `deplo` finds `deployment`.
+- **Ranked.** Threads that match every word come first. Title hits and exact words rank higher.
+- **Ticket keys.** Finds keys such as `ABC-123` in messages and in branch names like `fix/abc-123-login`.
+- **One-step resume.** Each result prints `cd <folder> && claude --resume <id>`. Moved folders are found again.
+- **Scriptable.** `--json` prints a stable [JSON contract](docs/json.md) for editors, launchers, and TUIs.
+- **Incremental.** `threads update` reads only the new lines of each transcript. A no-change update takes about 26 ms.
+- **Private.** No network code. Transcripts are opened read-only. The index is readable by your user only.
 
 ## Install
 
+You need Rust 1.100 or later.
+
 ```sh
+cargo install --git https://github.com/BryanLe80/thread-search-oss
+```
+
+Or build from a clone:
+
+```sh
+git clone https://github.com/BryanLe80/thread-search-oss
+cd thread-search-oss
 cargo install --path .
 ```
 
-This puts the `threads` binary in `~/.cargo/bin`.
+Both put the `threads` binary in `~/.cargo/bin`. The default index path is for macOS. On other
+systems, set `THREADS_INDEX` (see [Where things live](#where-things-live)).
 
-## Commands
+## Quick start
 
 ```sh
-threads update                                  # bring the index up to date (about 30 ms when nothing changed)
-threads rebuild                                 # delete the index and build it again
-threads stats                                   # thread count, message count, index size, last update
-threads search [--json] [--limit N] [--] <words...>
+threads update                     # build the index (a few seconds the first time)
+threads search retry backoff       # every word must match; the last word is a prefix
+threads search ABC-123             # find the threads for a ticket
+threads search --json --limit 5 -- deploy   # machine-readable output
+threads stats                      # thread count, message count, index size, last update
 ```
 
-Options go before the words. Use `--` before words that start with a dash. The default limit
-is 20. A word not in quotes matches as a prefix, so `deplo now` finds `deployment now`. The last
-word is a prefix from one letter, so a search can run while you type. A word before the last word
-is a prefix only when it has three or more letters. A shorter one matches a whole word only: in
-`to ship`, `to` does not match `today`, so a thread with `today we ship` does not match every word.
-The letters are counted in the last part of a word that holds `-`, `.`, or `/`, because the index
-splits the word there and only the last part can be a prefix. So `zork-quixa` is a prefix
-(`quixa` has five letters), and `quixa-zo` matches whole words only (`zo` has two).
-The prefix for a word before the last is for words in Latin letters and digits; a word with other
-letters (for example Cyrillic or Greek) matches whole there.
-A query of more than four words or quoted groups matches every word before the last as a whole
-word only. To find part of a word in a long query, put that word last.
-A thread that holds a typed word as a whole word, in a message, the title, or its keys, ranks above
-a newer thread that matches only through longer words when the matches are otherwise equal. A
-thread with more matches or a match in the title can still rank first.
-A word in quotes matches exactly. The index has no stemmer: in `retry now`, `retry` does not
-match `retries`, so a thread with `retries now` does not match every word.
-`search` does not update the index; run `threads update` first (the first search on a
-machine tells you to).
+`search` does not update the index. Run `threads update` first, for example from a shell hook or
+a launcher. The full query rules (prefixes, quotes, ranking) are in
+[docs/search.md](docs/search.md).
 
-`update` prints one line: `scanned N, unchanged N, appended N, reindexed N, removed N, scripted N`.
-Threads started by scripts (`claude -p`, the SDK) are counted as `scripted` and left out.
-When another `update` or `rebuild` runs, `update` and `rebuild` print `busy: another update runs` and exit 0. The command that prints `busy` changes nothing.
+## Performance
 
-## JSON contract
+Measured on an Apple Silicon Mac with a real history: 1,813 threads, 65,391 messages, and 12 GB
+of transcripts.
 
-`threads search --json` prints one JSON object:
+| Operation | Time | Memory |
+| --- | --- | --- |
+| `threads search`, ordinary words | **5.5 to 8.5 ms** median | about 9 MB |
+| `threads search`, very common words (`the and to`) | 25 ms median | about 10 MB |
+| `threads update`, nothing changed | 26 ms median | |
+| `threads rebuild`, full index | 3.3 s | about 25 MB |
+| `rg -l -i` over the same transcripts | 157 to 239 ms median (warm cache) | |
 
-```json
-{
-  "state": "ok",
-  "matched_all": 3,
-  "matched_some": 12,
-  "results": [
-    {
-      "agent": "claude",
-      "session_id": "...",
-      "title": "...",
-      "last_active": 1762950000,
-      "folder": "/path/to/project",
-      "folder_state": "ok",
-      "folder_name": "project",
-      "branch": "main",
-      "keys": ["ABC-123"],
-      "prompts": 14,
-      "desk_job": false,
-      "match": {
-        "role": "user",
-        "segments": [{ "text": "...", "hit": false }, { "text": "...", "hit": true }]
-      }
-    }
-  ]
-}
+| Size | Value |
+| --- | --- |
+| Index | 89.8 MB |
+| Binary (release, stripped) | 2.3 MB |
+
+ripgrep scans every file on every query and returns files, not ranked threads. `threads` reads
+each transcript once and then answers from the index, about 30 times faster on this history. The
+method and the full results are in [docs/measurements.md](docs/measurements.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    T["~/.claude/projects/**/*.jsonl<br/>(read-only)"] -->|"threads update<br/>reads only new lines"| I[("SQLite FTS5 index")]
+    I -->|"threads search"| R["Ranked threads<br/>snippet + keys + resume command"]
 ```
 
-- `state` is `ok`, `no_index` (run `threads update`), or `building`. With the last two,
-  `results` is empty.
-- `matched_all` counts threads that match every word; `matched_some` counts threads that
-  match some of them. A word can match in a message, the title, the keys, the folder name,
-  or the branch. `results` lists the `matched_all` threads first, best rank first.
-- `last_active` is Unix seconds: the time of the last message, or the modification time of the
-  transcript file when no message has a readable time. `folder_state` is `ok` or `gone` (the folder no longer exists).
-- `branch` is `null` when unknown.
-- `match.segments` is the snippet split into runs; `hit: true` marks the matched words.
-- `match.role` is `user`, `assistant`, or `summary`.
-- A thread that matches only in the title, the keys, the folder name, or the branch has
-  `role: "user"` and the first prompt as its one segment, with no `hit: true` segment. When
-  the thread has no first prompt, `segments` is empty.
-- A failure prints no JSON. It prints one line on stderr and exits with code 1. A usage error
-  exits with code 2.
+1. `threads update` walks the transcript folder. It skips unchanged files, reads only the appended
+   lines of grown files, and reads a file again only when it was rewritten.
+2. Each thread gets one row with its title, folder, branch, and ticket keys. Each message goes into
+   an FTS5 table with a `unicode61` tokenizer and no stemmer.
+3. `threads search` runs one FTS5 query, ranks the threads, and marks the matched words in a snippet.
+
+Threads that scripts start (`claude -p`, the Agent SDK) are left out.
+
+## Comparison
+
+| Tool | Searches every message | Persistent index | Ranked | Ticket keys | JSON | Interface |
+| --- | --- | --- | --- | --- | --- | --- |
+| **thread-search** | ✅ | ✅ SQLite FTS5 | ✅ | ✅ | ✅ | CLI |
+| [fast-resume](https://github.com/angristan/fast-resume) | ✅ | ✅ Tantivy | ✅ | ➖ | ✅ | TUI, many agents |
+| [agf](https://github.com/subinium/agf) | ❌ name, path, branch | ❌ | partial (fuzzy) | ➖ | ✅ | TUI, many agents |
+| [claude-code-history-viewer](https://github.com/jhlee0409/claude-code-history-viewer) | partial | ❌ | ➖ | ➖ | ✅ export | Desktop app |
+| [claude-historian-mcp](https://github.com/Vvkmnn/claude-historian-mcp) | partial (fuzzy) | ❌ in memory | ✅ | ➖ | ✅ | MCP server for Claude |
+| Claude Code `/resume` | ❌ title, summary, first prompt | n/a | ❌ | ❌ | ❌ | Built in |
+| `rg` over `~/.claude/projects` | ✅ | ❌ | ❌ | ❌ | ✅ | CLI |
+
+✅ yes · ❌ no · ➖ not documented. Data for other tools comes from their READMEs and docs on
+2026-11-13. If a row is wrong, please open an issue.
+
+**When to pick another tool.** Use fast-resume or agf for one picker over many agents (Codex,
+Gemini, and others). Use claude-code-history-viewer to browse threads in a desktop app. Use
+claude-historian-mcp to let Claude search its own history. Use `threads` for the fastest full-text
+search over Claude Code threads, ticket lookups, and a JSON feed for your own tools.
 
 ## Where things live
 
@@ -110,13 +136,17 @@ replaces an older `.bad`.
 - Index files are created with mode 0600, so only your user can read them. The index holds
   the text of your conversations; do not share or commit it.
 
-## Delete the index
+## FAQ
 
-```sh
-threads rebuild
-```
+**Old threads are missing.** Claude Code deletes transcripts after 30 days by default. Raise
+`cleanupPeriodDays` in your Claude Code settings to keep more history searchable. The index drops
+a thread when its transcript is deleted.
 
-`threads rebuild` deletes the index and builds it again from the transcripts. To delete it
+**A Claude Code update changed the transcripts.** The transcript format is internal to Claude Code
+and can change between versions. If results look wrong after an update, run `threads rebuild` and
+open an issue.
+
+**How do I delete the index?** Run `threads rebuild` to delete it and build it again. To delete it
 by hand, first make sure that no `threads` process runs. Then delete only these files:
 
 ```sh
@@ -133,6 +163,32 @@ stamp. An index built before the stamp has a `meta` table with a `schema_version
 `threads` table. The tool renames a file that SQLite cannot read as a database to
 `index.db.bad` and builds a new index. The schema version is 3.
 
-## Measured speed
+## Documentation
 
-See [docs/measurements.md](docs/measurements.md).
+- [Commands and search syntax](docs/search.md)
+- [JSON output](docs/json.md)
+- [Measurements](docs/measurements.md)
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+```
+
+To record the demo GIF again, install [VHS](https://github.com/charmbracelet/vhs), then run:
+
+```sh
+cargo build --release && vhs demo/demo.tape
+```
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option.
+
+Unless you explicitly state otherwise, any contribution you submit for inclusion in this project,
+as defined in the Apache-2.0 license, is dual licensed as above, without any additional terms or
+conditions.
