@@ -25,7 +25,7 @@ Type "threads search migration roll" Enter
 Sleep 4s
 Type "clear" Enter
 
-Type "threads search --limit 2 ABC-3" Enter
+Type "threads search ABC-317" Enter
 Sleep 4s
 Type "clear" Enter
 

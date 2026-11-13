@@ -179,3 +179,27 @@ Notes:
 - A prefix of one or two letters before the last word was measured at 32.1 ms for `t a s` and
   65.0 ms for five one-letter words. Each such word reads most of the index again in the word
   scan, the phrase check, and the snippet query. This is why the rule starts at three letters.
+
+## Comparison with ripgrep (2026-11-13)
+
+Machine: Apple M5 Max. Build: this repository on Rust 1.100, release profile. History: 1,813
+threads and 65,411 messages in the index, from 12,156 transcript files (12 GB) under
+`~/.claude/projects`. Index size: 89.8 MB.
+
+| Query | `threads search --json` | `rg -uu -g '*.jsonl' -l -i -F` |
+| --- | --- | --- |
+| `deployment` | 5.0 ms (4.8 to 6.2) | 148.7 ms (145.6 to 327.5) |
+| `migration rollback` | 6.3 ms (6.0 to 6.6) | 242.6 ms (236.3 to 362.5) |
+| `retry queue worker` | 9.5 ms (9.4 to 21.7) | not run |
+| `the and to` | 30.1 ms (29.4 to 51.4) | not run |
+
+Method:
+
+- `threads update` ran first, so the index was current.
+- Each figure is the median wall time, with the range in parentheses: seven runs for `threads`,
+  five for `rg`. A wrapper starts each process with a monotonic clock and discards its output.
+- The page cache was warm for both tools. A cold cache makes `rg` slower; `threads` reads only the
+  index.
+- The two tools answer different questions. `rg` matches the words as one phrase and lists files.
+  `threads` matches every word anywhere in a thread, ranks the threads, and builds snippets.
+- `-uu` turns off ignore files. Without it, `rg` skips the transcripts and finds nothing.

@@ -17,12 +17,12 @@ resumes each one.
 
 ## Features
 
-- **Full text.** Searches every user and assistant message, the thread title, the folder, and the git branch.
-- **Fast.** About 6 ms for a search over 1,800 threads and 65,000 messages. See [Performance](#performance).
+- **Full text.** Searches every user and assistant message, the thread title, the folder name, and the git branch.
+- **Fast.** 5 to 10 ms for a typical search over 1,800 threads and 65,000 messages. See [Performance](#performance).
 - **Search as you type.** The last word matches as a prefix from one letter, so `deplo` finds `deployment`.
 - **Ranked.** Threads that match every word come first. Title hits and exact words rank higher.
-- **Ticket keys.** Finds keys such as `ABC-123` in messages and in branch names like `fix/abc-123-login`.
-- **One-step resume.** Each result prints `cd <folder> && claude --resume <id>`. Moved folders are found again.
+- **Ticket keys.** Takes keys such as `ABC-123` from your prompts, thread titles, and branch names like `fix/abc-123-login`.
+- **One-step resume.** Each result prints `cd <folder> && claude --resume <id>`. A moved project folder is found again ([one exception](docs/measurements.md#slug-rule-on-a-long-path)).
 - **Scriptable.** `--json` prints a stable [JSON contract](docs/json.md) for editors, launchers, and TUIs.
 - **Incremental.** `threads update` reads only the new lines of each transcript. A no-change update takes about 26 ms.
 - **Private.** No network code. Transcripts are opened read-only. The index is readable by your user only.
@@ -62,25 +62,30 @@ a launcher. The full query rules (prefixes, quotes, ranking) are in
 
 ## Performance
 
-Measured on an Apple Silicon Mac with a real history: 1,813 threads, 65,391 messages, and 12 GB
-of transcripts.
+Search times are medians on an Apple M5 Max with a real history: 1,813 threads and 65,411
+messages from 12 GB of transcripts.
 
-| Operation | Time | Memory |
+| Query | `threads search` | ripgrep over the same transcripts |
 | --- | --- | --- |
-| `threads search`, ordinary words | **5.5 to 8.5 ms** median | about 9 MB |
-| `threads search`, very common words (`the and to`) | 25 ms median | about 10 MB |
-| `threads update`, nothing changed | 26 ms median | |
-| `threads rebuild`, full index | 3.3 s | about 25 MB |
-| `rg -l -i` over the same transcripts | 157 to 239 ms median (warm cache) | |
+| One word (`deployment`) | **5.0 ms** | 148.7 ms |
+| Two words (`migration rollback`) | **6.3 ms** | 242.6 ms |
+| Three ordinary words | **9.5 ms** | |
+| Three very common words (`the and to`) | 30.1 ms | |
 
-| Size | Value |
+ripgrep scans every file on every query and lists files, not ranked threads. `threads` reads each
+transcript once and then answers from the index, 30 to 38 times faster on this history.
+
+From an earlier run on the same history (1,809 threads):
+
+| Operation | Result |
 | --- | --- |
-| Index | 89.8 MB |
-| Binary (release, stripped) | 2.3 MB |
+| `threads update`, nothing changed | 26 ms median |
+| `threads rebuild`, full index | 3.3 s, about 25 MB peak memory |
+| `threads search` peak memory | 9 to 10 MB |
+| Index size | 89 MB |
+| Binary size (release, stripped) | 2.3 MB |
 
-ripgrep scans every file on every query and returns files, not ranked threads. `threads` reads
-each transcript once and then answers from the index, about 30 times faster on this history. The
-method and the full results are in [docs/measurements.md](docs/measurements.md).
+The method and the full results are in [docs/measurements.md](docs/measurements.md).
 
 ## How it works
 
@@ -147,7 +152,9 @@ and can change between versions. If results look wrong after an update, run `thr
 open an issue.
 
 **How do I delete the index?** Run `threads rebuild` to delete it and build it again. To delete it
-by hand, first make sure that no `threads` process runs. Then delete only these files:
+by hand, first make sure that no `threads` process runs. Then delete only these files. The
+commands use the default macOS path. If you set `THREADS_INDEX`, delete that file and its `-wal`
+and `-shm` files instead.
 
 ```sh
 rm -f ~/Library/Application\ Support/thread-search/index.db \
