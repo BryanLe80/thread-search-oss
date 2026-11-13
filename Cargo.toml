@@ -3,6 +3,12 @@ name = "thread-search"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.100"
+description = "Local full-text search over Claude Code conversation threads"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/BryanLe80/thread-search-oss"
+readme = "README.md"
+keywords = ["claude", "search", "sqlite", "fts5", "cli"]
+categories = ["command-line-utilities"]
 
 [lib]
 name = "thread_search"
