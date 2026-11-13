@@ -178,12 +178,6 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-To record the demo GIF again, install [VHS](https://github.com/charmbracelet/vhs), then run:
-
-```sh
-cargo build --release && vhs demo/demo.tape
-```
-
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

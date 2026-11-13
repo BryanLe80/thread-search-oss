@@ -1,4 +1,5 @@
-# Records docs/images/demo.gif from fake threads. Run from the repo root:
+# Records docs/images/demo.gif from fake threads. Needs VHS (https://github.com/charmbracelet/vhs).
+# Run from the repo root:
 #   cargo build --release && vhs demo/demo.tape
 
 Output docs/images/demo.gif
